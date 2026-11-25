@@ -1,0 +1,13 @@
+{
+  "name": "quanlythamquannhan",
+  "version": "1.0.0",
+  "private": true,
+  "description": "He thong Dang ky & Tong hop Than nhan Tham Quan nhan (Cloudflare Workers + D1)",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev"
+  },
+  "dependencies": {
+    "qrcode-generator": "^1.4.4"
+  }
+}

@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Đăng ký thăm quân nhân</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <header class="mil-header no-print">
+        <div class="mil-header-inner">
+            <div class="mil-brand">
+                <div class="mil-emblem" aria-hidden="true">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="#fbbf24">
+                        <path d="M12 2l2.9 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l7.1-1.01L12 2z"/>
+                    </svg>
+                </div>
+                <div class="mil-brand-text">
+                    <h1 id="hdrUnitName">ĐƠN VỊ QUÂN ĐỘI NHÂN DÂN VIỆT NAM</h1>
+                    <p id="hdrGateTitle">CỔNG TRỰC BAN - NHÀ TIẾP ĐÓN THÂN NHÂN</p>
+                </div>
+            </div>
+            <div class="header-actions">
+                <a href="/login" class="btn btn-header">Cán bộ đăng nhập</a>
+            </div>
+        </div>
+    </header>
+
+    <main class="container-narrow">
+        <section id="formCard" class="card">
+            <h2 class="card-title">PHIẾU ĐĂNG KÝ THĂM QUÂN NHÂN</h2>
+            <div class="notice-box" id="welcomeNoteBox">
+                Quý thân nhân vui lòng điền đầy đủ, chính xác thông tin theo Căn cước công dân để phục vụ công tác kiểm tra và tiếp đón tại đơn vị.
+            </div>
+
+            <div id="formError" class="alert alert-error" style="display: none;"></div>
+
+            <form id="registerForm" novalidate>
+                <div class="form-group">
+                    <label for="full_name">Họ và tên người thăm <span class="req">*</span></label>
+                    <input type="text" id="full_name" name="full_name" maxlength="80" placeholder="Ví dụ: Nguyễn Văn An" required autocomplete="name">
+                    <div class="hint">Chỉ nhập chữ cái và khoảng trắng, không nhập số hoặc ký tự đặc biệt.</div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="date_of_birth">Ngày tháng năm sinh <span class="req">*</span></label>
+                        <input type="date" id="date_of_birth" name="date_of_birth" min="1910-01-01" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="cccd">Số CCCD <span class="req">*</span></label>
+                        <input type="text" id="cccd" name="cccd" inputmode="numeric" maxlength="12" pattern="[0-9]{12}" placeholder="Nhập đúng 12 số CCCD" required>
+                        <div class="hint">Bắt buộc đúng 12 chữ số, không được nhập chữ.</div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="relationship">Quan hệ với quân nhân <span class="req">*</span></label>
+                    <select id="relationship" name="relationship" required>
+                        <option value="">-- Chọn quan hệ --</option>
+                    </select>
+                </div>
+
+                <div class="form-group" id="relationshipOtherGroup" style="display: none;">
+                    <label for="relationship_other">Ghi rõ quan hệ khác <span class="req">*</span></label>
+                    <input type="text" id="relationship_other" name="relationship_other" maxlength="50" placeholder="Ví dụ: Hàng xóm, Đồng hương">
+                </div>
+
+                <div class="form-group">
+                    <label for="soldier_name">Tên thân nhân (quân nhân) được thăm <span class="req">*</span></label>
+                    <input type="text" id="soldier_name" name="soldier_name" maxlength="80" placeholder="Ví dụ: Binh nhất Nguyễn Văn Bình" required>
+                    <div class="hint">Chỉ nhập chữ cái và khoảng trắng, không nhập số hoặc ký tự đặc biệt.</div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="phone">Số điện thoại liên hệ <span class="req">*</span></label>
+                        <input type="tel" id="phone" name="phone" inputmode="numeric" maxlength="10" pattern="0[0-9]{9}" placeholder="Ví dụ: 0912345678" required>
+                        <div class="hint">Đúng 10 chữ số, bắt đầu bằng số 0, không nhập chữ.</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="unit_name">Đơn vị / Đại đội (không bắt buộc)</label>
+                        <input type="text" id="unit_name" name="unit_name" maxlength="80" placeholder="Ví dụ: Đại đội 1, Tiểu đoàn 2">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="note">Ghi chú / Biển số xe (không bắt buộc)</label>
+                    <input type="text" id="note" name="note" maxlength="250" placeholder="Ví dụ: Đi xe máy 29A1-12345, đi cùng 2 người...">
+                </div>
+
+                <button type="submit" id="submitBtn" class="btn btn-primary btn-block">
+                    ĐĂNG KÝ
+                </button>
+            </form>
+        </section>
+
+        <section id="receiptCard" class="card" style="display: none;">
+            <div class="alert alert-success">
+                Đăng ký thông tin thăm quân nhân thành công! Dữ liệu đã được gửi tới bộ phận trực ban.
+            </div>
+
+            <div class="receipt-box">
+                <div style="text-align: center;">
+                    <div style="font-size: 0.85rem; color: var(--muted); font-weight: 600; text-transform: uppercase;">
+                        Phiếu xác nhận đăng ký điện tử
+                    </div>
+                    <div class="receipt-code" id="recCode">TN-000000-0000</div>
+                </div>
+
+                <table class="receipt-table">
+                    <tr><td>Họ tên người thăm</td><td id="recName"></td></tr>
+                    <tr><td>Ngày sinh</td><td id="recDob"></td></tr>
+                    <tr><td>Số CCCD</td><td id="recCccd"></td></tr>
+                    <tr><td>Quan hệ quân nhân</td><td id="recRel"></td></tr>
+                    <tr><td>Quân nhân được thăm</td><td id="recSoldier"></td></tr>
+                    <tr id="recUnitRow"><td>Đơn vị</td><td id="recUnit"></td></tr>
+                    <tr><td>Ngày thăm</td><td id="recDate"></td></tr>
+                    <tr><td>Thời gian gửi</td><td id="recTime"></td></tr>
+                    <tr><td>Trạng thái</td><td><span class="badge badge-pending" id="recStatus"></span></td></tr>
+                </table>
+            </div>
+
+            <p class="hint" style="text-align: center; margin-top: 12px;">
+                Quý thân nhân vui lòng xuất trình CCCD bản gốc cùng màn hình này cho lực lượng Vệ binh / Trực ban khi vào cổng.
+            </p>
+
+            <button type="button" id="registerAnotherBtn" class="btn btn-outline btn-block" style="margin-top: 10px;">
+                Đăng ký thêm người thăm khác
+            </button>
+        </section>
+    </main>
+
+    <footer class="footer-note no-print">
+        Hệ thống Đăng ký &amp; Tổng hợp Thân nhân Thăm Quân nhân • Phục vụ công tác Trực ban &amp; Tiếp đón
+    </footer>
+
+    <script src="/js/register.js"></script>
+</body>
+</html>

@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Đăng nhập Trực ban</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <header class="mil-header no-print">
+        <div class="mil-header-inner">
+            <div class="mil-brand">
+                <div class="mil-emblem" aria-hidden="true">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="#fbbf24">
+                        <path d="M12 2l2.9 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l7.1-1.01L12 2z"/>
+                    </svg>
+                </div>
+                <div class="mil-brand-text">
+                    <h1 id="hdrUnitName">ĐƠN VỊ QUÂN ĐỘI NHÂN DÂN VIỆT NAM</h1>
+                    <p id="hdrGateTitle">CỔNG TRỰC BAN - ĐĂNG KÝ THĂM QUÂN NHÂN</p>
+                </div>
+            </div>
+            <div class="header-actions">
+                <a href="/" class="btn btn-header">Trang đăng ký khách</a>
+            </div>
+        </div>
+    </header>
+
+    <main class="container-narrow" style="max-width: 440px; margin-top: 36px;">
+        <section class="card">
+            <h2 class="card-title" style="text-align: center;">ĐĂNG NHẬP CÁN BỘ TRỰC BAN</h2>
+            <p class="hint" style="text-align: center; margin-bottom: 18px;">
+                Khu vực dành cho Trực ban, Vệ binh và Chỉ huy đơn vị tổng hợp số lượng thân nhân thăm quân nhân.
+            </p>
+
+            <div id="loginError" class="alert alert-error" style="display: none;"></div>
+
+            <form id="loginForm">
+                <div class="form-group">
+                    <label for="username">Tên đăng nhập</label>
+                    <input type="text" id="username" name="username" required autocomplete="username" autofocus>
+                </div>
+                <div class="form-group">
+                    <label for="password">Mật khẩu</label>
+                    <input type="password" id="password" name="password" required autocomplete="current-password">
+                </div>
+                <button type="submit" id="loginBtn" class="btn btn-primary btn-block">ĐĂNG NHẬP</button>
+            </form>
+        </section>
+    </main>
+
+    <footer class="footer-note no-print">
+        Hệ thống Đăng ký &amp; Tổng hợp Thân nhân Thăm Quân nhân • Phục vụ công tác Trực ban &amp; Tiếp đón
+    </footer>
+
+    <script>
+        (function () {
+            let loginCsrf = "";
+            const errEl = document.getElementById("loginError");
+            const btn = document.getElementById("loginBtn");
+
+            fetch("/api/admin/me").then((r) => {
+                if (r.ok) window.location.replace("/admin");
+            }).catch(() => {});
+
+            async function init() {
+                try {
+                    const resp = await fetch("/api/public-info");
+                    const data = await resp.json();
+                    if (data.ok) {
+                        loginCsrf = data.login_csrf || "";
+                        if (data.settings.unit_name) {
+                            document.getElementById("hdrUnitName").textContent = data.settings.unit_name;
+                        }
+                        if (data.settings.gate_title) {
+                            document.getElementById("hdrGateTitle").textContent = data.settings.gate_title;
+                        }
+                    }
+                } catch {}
+            }
+
+            document.getElementById("loginForm").addEventListener("submit", async (e) => {
+                e.preventDefault();
+                errEl.style.display = "none";
+                btn.disabled = true;
+                btn.textContent = "ĐANG ĐĂNG NHẬP...";
+                try {
+                    const resp = await fetch("/api/login", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            username: document.getElementById("username").value.trim(),
+                            password: document.getElementById("password").value,
+                            login_csrf: loginCsrf,
+                        }),
+                    });
+                    const data = await resp.json();
+                    if (!resp.ok || !data.ok) {
+                        errEl.textContent = data.error || "Tên đăng nhập hoặc mật khẩu không đúng.";
+                        errEl.style.display = "block";
+                        if (resp.status === 403) init();
+                        return;
+                    }
+                    window.location.replace("/admin");
+                } catch {
+                    errEl.textContent = "Lỗi kết nối mạng, vui lòng thử lại.";
+                    errEl.style.display = "block";
+                } finally {
+                    btn.disabled = false;
+                    btn.textContent = "ĐĂNG NHẬP";
+                }
+            });
+
+            init();
+        })();
+    </script>
+</body>
+</html>
