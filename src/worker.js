@@ -419,8 +419,8 @@ function validateVisitorPayload(data) {
     };
   }
 
-  if (unit_name && (unit_name.length > 80 || /[<>]/.test(unit_name))) {
-    return { error: "Tên đơn vị không hợp lệ (tối đa 80 ký tự, không chứa < hoặc >)." };
+  if (unit_name && (unit_name.length > 120 || /[<>]/.test(unit_name))) {
+    return { error: "Tên đơn vị không hợp lệ (tối đa 120 ký tự, không chứa < hoặc >)." };
   }
 
   if (visit_location && (visit_location.length > 100 || /[<>]/.test(visit_location))) {
@@ -1446,7 +1446,7 @@ export default {
     if (path === "/api/admin/soldiers" && method === "POST") {
       const payload = await readJsonBody(request);
       const full_name = String(payload.full_name || "").trim().replace(/\s+/g, " ");
-      const unit_name = String(payload.unit_name || "").trim().replace(/\s+/g, " ").slice(0, 80);
+      const unit_name = String(payload.unit_name || "").trim().replace(/\s+/g, " ").slice(0, 120);
       const rank_title = String(payload.rank_title || "").trim().replace(/\s+/g, " ").slice(0, 50);
 
       if (!isValidPersonName(full_name)) {
@@ -1499,7 +1499,7 @@ export default {
       let skipped = 0;
       for (const item of items) {
         const full_name = String(item?.full_name || "").trim().replace(/\s+/g, " ");
-        const unit_name = String(item?.unit_name || "").trim().replace(/\s+/g, " ").slice(0, 80);
+        const unit_name = String(item?.unit_name || "").trim().replace(/\s+/g, " ").slice(0, 120);
         const rank_title = String(item?.rank_title || "").trim().replace(/\s+/g, " ").slice(0, 50);
 
         if (!isValidPersonName(full_name) || /[<>]/.test(unit_name) || /[<>]/.test(rank_title)) {

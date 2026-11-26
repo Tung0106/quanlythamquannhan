@@ -661,10 +661,11 @@
         const sample =
             bom +
             [
-                "Họ tên quân nhân,Đơn vị,Cấp bậc / Chức vụ",
-                "Nguyễn Văn Bình,Đại đội 1 - Tiểu đoàn 1,Binh nhất",
-                "Trần Minh Tuấn,Đại đội 2 - Tiểu đoàn 1,Binh nhì",
-                "Lê Hoàng Anh,Đại đội 3 - Tiểu đoàn 2,Trung sĩ",
+                "DANH SÁCH QUÂN SỐ TIỂU ĐOÀN 1 - ĐẠI ĐỘI 1,,,,,,,",
+                "STT,Tiểu đoàn,Đại đội,Trung đội,Tiểu đội,Họ và tên,Chức vụ,Ghi chú",
+                "1,Tiểu đoàn 1,Đại đội 1,Trung đội 1,Tiểu đội 1,Hồ Công Quy,Tiểu đội trưởng,",
+                "2,Tiểu đoàn 1,Đại đội 1,Trung đội 1,Tiểu đội 1,Hoàng Tuấn Hoàng,Chiến sĩ,",
+                "3,Tiểu đoàn 1,Đại đội 1,Trung đội 1,Tiểu đội 1,Đoàn Đức Kiên,Chiến sĩ,",
             ].join("\r\n");
         const blob = new Blob([sample], { type: "text/csv;charset=utf-8;" });
         const link = document.createElement("a");

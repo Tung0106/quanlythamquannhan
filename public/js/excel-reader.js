@@ -8,13 +8,14 @@
         const lines = clean.split(/\r?\n/).filter((l) => l.trim().length > 0);
         if (!lines.length) return [];
 
-        const firstLine = lines[0];
-        const commaCount = (firstLine.match(/,/g) || []).length;
-        const semiCount = (firstLine.match(/;/g) || []).length;
-        const tabCount = (firstLine.match(/\t/g) || []).length;
+        // Detect delimiter across first few non-empty lines
+        const sampleText = lines.slice(0, 6).join("\n");
+        const commaCount = (sampleText.match(/,/g) || []).length;
+        const semiCount = (sampleText.match(/;/g) || []).length;
+        const tabCount = (sampleText.match(/\t/g) || []).length;
         let sep = ",";
-        if (semiCount > commaCount && semiCount >= tabCount) sep = ";";
-        else if (tabCount > commaCount && tabCount > semiCount) sep = "\t";
+        if (tabCount >= semiCount && tabCount >= commaCount && tabCount > 0) sep = "\t";
+        else if (semiCount > commaCount) sep = ";";
 
         const rows = [];
         for (const line of lines) {
@@ -51,7 +52,9 @@
 
     async function inflateRaw(bytes) {
         if (typeof DecompressionStream === "undefined") {
-            throw new Error("Trình duyệt không hỗ trợ giải nén .xlsx. Vui lòng lưu Excel dưới dạng .csv (UTF-8).");
+            throw new Error(
+                "Trình duyệt không hỗ trợ giải nén .xlsx. Vui lòng lưu Excel dưới dạng .csv (UTF-8)."
+            );
         }
         const ds = new DecompressionStream("deflate-raw");
         const stream = new Blob([bytes]).stream().pipeThrough(ds);
@@ -63,7 +66,6 @@
         const bytes = new Uint8Array(arrayBuffer);
         const view = new DataView(arrayBuffer);
 
-        // Locate End of Central Directory (0x06054b50)
         let eocdOffset = -1;
         for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 65557); i--) {
             if (view.getUint32(i, true) === 0x06054b50) {
@@ -118,36 +120,7 @@
         return idx - 1;
     }
 
-    async function parseXlsxBuffer(arrayBuffer) {
-        const files = await unzipEntries(arrayBuffer);
-        const parser = new DOMParser();
-
-        // Read shared strings
-        const sharedStrings = [];
-        if (files["xl/sharedStrings.xml"]) {
-            const doc = parser.parseFromString(decodeText(files["xl/sharedStrings.xml"]), "application/xml");
-            const siNodes = doc.getElementsByTagName("si");
-            for (const si of siNodes) {
-                const tNodes = si.getElementsByTagName("t");
-                let text = "";
-                for (const t of tNodes) text += t.textContent || "";
-                sharedStrings.push(text.trim());
-            }
-        }
-
-        // Find first worksheet
-        const sheetName =
-            files["xl/worksheets/sheet1.xml"]
-                ? "xl/worksheets/sheet1.xml"
-                : Object.keys(files)
-                      .filter((k) => k.startsWith("xl/worksheets/sheet") && k.endsWith(".xml"))
-                      .sort()[0];
-
-        if (!sheetName || !files[sheetName]) {
-            throw new Error("Không tìm thấy sheet dữ liệu trong file .xlsx.");
-        }
-
-        const sheetDoc = parser.parseFromString(decodeText(files[sheetName]), "application/xml");
+    function parseSheetDoc(sheetDoc, sharedStrings) {
         const rowNodes = sheetDoc.getElementsByTagName("row");
         const rows = [];
 
@@ -183,50 +156,146 @@
         return rows;
     }
 
+    async function parseXlsxSheets(arrayBuffer) {
+        const files = await unzipEntries(arrayBuffer);
+        const parser = new DOMParser();
+
+        const sharedStrings = [];
+        if (files["xl/sharedStrings.xml"]) {
+            const doc = parser.parseFromString(
+                decodeText(files["xl/sharedStrings.xml"]),
+                "application/xml"
+            );
+            const siNodes = doc.getElementsByTagName("si");
+            for (const si of siNodes) {
+                const tNodes = si.getElementsByTagName("t");
+                let text = "";
+                for (const t of tNodes) text += t.textContent || "";
+                sharedStrings.push(text.trim());
+            }
+        }
+
+        const sheetPaths = Object.keys(files)
+            .filter((k) => /^xl\/worksheets\/sheet\d+\.xml$/i.test(k))
+            .sort((a, b) => {
+                const na = parseInt(a.match(/\d+/)[0], 10);
+                const nb = parseInt(b.match(/\d+/)[0], 10);
+                return na - nb;
+            });
+
+        if (!sheetPaths.length) {
+            throw new Error("Không tìm thấy sheet dữ liệu trong file .xlsx.");
+        }
+
+        const allSheetsRows = [];
+        for (const sp of sheetPaths) {
+            const sheetDoc = parser.parseFromString(decodeText(files[sp]), "application/xml");
+            const rows = parseSheetDoc(sheetDoc, sharedStrings);
+            if (rows.length) allSheetsRows.push(rows);
+        }
+        return allSheetsRows;
+    }
+
     function normalizeHeader(h) {
         return String(h || "")
             .normalize("NFD")
             .replace(/[\u0300-\u036f]/g, "")
             .replace(/[đĐ]/g, "d")
             .toLowerCase()
-            .trim();
+            .trim()
+            .replace(/\s+/g, " ");
+    }
+
+    function detectHeaderRow(rows) {
+        const limit = Math.min(rows.length, 20);
+        for (let r = 0; r < limit; r++) {
+            const norms = rows[r].map(normalizeHeader);
+            let nameCol = -1;
+            let battalionCol = -1;
+            let companyCol = -1;
+            let platoonCol = -1;
+            let squadCol = -1;
+            let genericUnitCol = -1;
+            let rankCol = -1;
+
+            for (let c = 0; c < norms.length; c++) {
+                const h = norms[c];
+                if (!h) continue;
+
+                if (
+                    h === "ho va ten" ||
+                    h === "ho ten" ||
+                    h.includes("ho ten") ||
+                    h.includes("ho va ten") ||
+                    h.includes("ten quan nhan") ||
+                    h === "name"
+                ) {
+                    if (nameCol === -1) nameCol = c;
+                } else if (h === "tieu doan" || h.includes("tieu doan")) {
+                    battalionCol = c;
+                } else if (h === "dai doi" || h.includes("dai doi")) {
+                    companyCol = c;
+                } else if (h === "trung doan" || h.includes("trung doan")) {
+                    // ignore regiment column if present or treat separately
+                } else if (h === "trung doi" || h.includes("trung doi")) {
+                    platoonCol = c;
+                } else if (h === "tieu doi" || h.includes("tieu doi")) {
+                    squadCol = c;
+                } else if (h === "don vi" || h.includes("don vi") || h === "unit") {
+                    genericUnitCol = c;
+                } else if (
+                    h === "chuc vu" ||
+                    h === "cap bac" ||
+                    h.includes("chuc vu") ||
+                    h.includes("cap bac") ||
+                    h === "rank"
+                ) {
+                    if (rankCol === -1) rankCol = c;
+                }
+            }
+
+            if (nameCol !== -1) {
+                const unitCols = [battalionCol, companyCol, platoonCol, squadCol].filter(
+                    (idx) => idx !== -1
+                );
+                if (!unitCols.length && genericUnitCol !== -1) {
+                    unitCols.push(genericUnitCol);
+                }
+                return {
+                    headerRowIdx: r,
+                    nameCol,
+                    unitCols,
+                    rankCol,
+                };
+            }
+        }
+        return null;
     }
 
     function mapRowsToSoldiers(rows) {
         if (!rows || !rows.length) return [];
 
-        const firstRowNorm = rows[0].map(normalizeHeader);
-        let nameCol = -1;
-        let unitCol = -1;
+        const detected = detectHeaderRow(rows);
+        let nameCol = 0;
+        let unitCols = [];
         let rankCol = -1;
         let startRow = 0;
 
-        for (let i = 0; i < firstRowNorm.length; i++) {
-            const h = firstRowNorm[i];
-            if (!h) continue;
-            if (h.includes("ten") || h.includes("quan nhan") || h.includes("ho va ten") || h === "name") {
-                if (nameCol === -1) nameCol = i;
-            } else if (h.includes("don vi") || h.includes("dai doi") || h.includes("tieu doan") || h.includes("unit")) {
-                if (unitCol === -1) unitCol = i;
-            } else if (h.includes("cap bac") || h.includes("chuc vu") || h.includes("rank")) {
-                if (rankCol === -1) rankCol = i;
-            }
-        }
-
-        if (nameCol !== -1 || unitCol !== -1 || rankCol !== -1) {
-            startRow = 1;
-            if (nameCol === -1) nameCol = 0;
+        if (detected) {
+            startRow = detected.headerRowIdx + 1;
+            nameCol = detected.nameCol;
+            unitCols = detected.unitCols;
+            rankCol = detected.rankCol;
         } else {
-            // No header row: if col 0 looks like STT (digits only) and col 1 has text, use col 1 as name
             const sample = rows[0];
             if (/^\d+$/.test((sample[0] || "").trim()) && (sample[1] || "").trim()) {
                 nameCol = 1;
-                unitCol = sample.length > 2 ? 2 : -1;
-                rankCol = sample.length > 3 ? 3 : -1;
+                if (sample.length > 2) unitCols = [2];
+                if (sample.length > 3) rankCol = 3;
             } else {
                 nameCol = 0;
-                unitCol = sample.length > 1 ? 1 : -1;
-                rankCol = sample.length > 2 ? 2 : -1;
+                if (sample.length > 1) unitCols = [1];
+                if (sample.length > 2) rankCol = 2;
             }
         }
 
@@ -235,8 +304,24 @@
             const row = rows[r];
             const full_name = String(row[nameCol] || "").trim().replace(/\s+/g, " ");
             if (!full_name) continue;
-            const unit_name = unitCol >= 0 ? String(row[unitCol] || "").trim().replace(/\s+/g, " ") : "";
-            const rank_title = rankCol >= 0 ? String(row[rankCol] || "").trim().replace(/\s+/g, " ") : "";
+
+            // Skip accidental repeated header or summary rows
+            const nameNorm = normalizeHeader(full_name);
+            if (nameNorm === "ho va ten" || nameNorm === "ho ten" || nameNorm.startsWith("tong ")) {
+                continue;
+            }
+
+            const unitParts = [];
+            for (const uCol of unitCols) {
+                const part = String(row[uCol] || "").trim().replace(/\s+/g, " ");
+                if (part && !unitParts.includes(part)) {
+                    unitParts.push(part);
+                }
+            }
+            const unit_name = unitParts.join(" - ");
+            const rank_title =
+                rankCol >= 0 ? String(row[rankCol] || "").trim().replace(/\s+/g, " ") : "";
+
             soldiers.push({ full_name, unit_name, rank_title });
         }
         return soldiers;
@@ -245,17 +330,22 @@
     async function readSoldierExcelFile(file) {
         const fileName = (file.name || "").toLowerCase();
         if (fileName.endsWith(".xls")) {
-            throw new Error("Định dạng .xls cũ không được hỗ trợ. Vui lòng mở bằng Excel và lưu lại dưới dạng .xlsx hoặc .csv (UTF-8).");
+            throw new Error(
+                "Định dạng .xls cũ không được hỗ trợ. Vui lòng mở bằng Excel và lưu lại dưới dạng .xlsx hoặc .csv (UTF-8)."
+            );
         }
-        let rows;
         if (fileName.endsWith(".csv") || fileName.endsWith(".txt")) {
             const text = await file.text();
-            rows = parseCsvText(text);
-        } else {
-            const buf = await file.arrayBuffer();
-            rows = await parseXlsxBuffer(buf);
+            return mapRowsToSoldiers(parseCsvText(text));
         }
-        return mapRowsToSoldiers(rows);
+
+        const buf = await file.arrayBuffer();
+        const sheets = await parseXlsxSheets(buf);
+        const allSoldiers = [];
+        for (const rows of sheets) {
+            allSoldiers.push(...mapRowsToSoldiers(rows));
+        }
+        return allSoldiers;
     }
 
     global.readSoldierExcelFile = readSoldierExcelFile;
