@@ -16,7 +16,8 @@
                     </svg>
                 </div>
                 <div class="mil-brand-text">
-                    <h1 id="hdrUnitName">ĐƠN VỊ QUÂN ĐỘI NHÂN DÂN VIỆT NAM</h1>
+                    <h1 id="hdrUnitName">BỘ CHỈ HUY QUÂN SỰ TỈNH GIA LAI
+TRUNG ĐOÀN 739</h1>
                     <p id="hdrGateTitle">CỔNG TRỰC BAN - NHÀ TIẾP ĐÓN THÂN NHÂN</p>
                 </div>
             </div>
@@ -68,9 +69,14 @@
                 </div>
 
                 <div class="form-group">
-                    <label for="soldier_name">Tên thân nhân (quân nhân) được thăm <span class="req">*</span></label>
-                    <input type="text" id="soldier_name" name="soldier_name" maxlength="80" placeholder="Ví dụ: Binh nhất Nguyễn Văn Bình" required>
-                    <div class="hint">Chỉ nhập chữ cái và khoảng trắng, không nhập số hoặc ký tự đặc biệt.</div>
+                    <label for="soldier_name">Tên (quân nhân) được thăm <span class="req">*</span></label>
+                    <div class="soldier-autocomplete">
+                        <input type="hidden" id="soldier_id" name="soldier_id" value="">
+                        <input type="text" id="soldier_name" name="soldier_name" maxlength="80" placeholder="Ví dụ: Nguyễn Văn Bình" autocomplete="off" required>
+                        <div id="soldierDropdown" class="soldier-dropdown" style="display: none;"></div>
+                    </div>
+                    <div id="soldierSelectedChip" class="soldier-selected-chip" style="display: none;"></div>
+                    <div class="hint" id="soldierHint">Chỉ nhập chữ cái và khoảng trắng, không nhập số hoặc ký tự đặc biệt.</div>
                 </div>
 
                 <div class="form-row">
@@ -86,9 +92,22 @@
                     </div>
                 </div>
 
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="visit_location">Vị trí thăm thân</label>
+                        <input type="text" id="visit_location" name="visit_location" maxlength="100" placeholder="Ví dụ: Căn tin, sân bóng, nhà sa bàn...">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="visitor_count">Số lượng người nhà vào thăm <span class="req">*</span></label>
+                        <input type="number" id="visitor_count" name="visitor_count" inputmode="numeric" min="1" max="50" value="1" required>
+                        <div class="hint">Nhập tổng số người cùng đi trong lượt thăm (từ 1 đến 50).</div>
+                    </div>
+                </div>
+
                 <div class="form-group">
                     <label for="note">Ghi chú / Biển số xe (không bắt buộc)</label>
-                    <input type="text" id="note" name="note" maxlength="250" placeholder="Ví dụ: Đi xe máy 29A1-12345, đi cùng 2 người...">
+                    <input type="text" id="note" name="note" maxlength="250" placeholder="Ví dụ: Đi xe máy 29A1-12345...">
                 </div>
 
                 <button type="submit" id="submitBtn" class="btn btn-primary btn-block">
@@ -117,6 +136,8 @@
                     <tr><td>Quan hệ quân nhân</td><td id="recRel"></td></tr>
                     <tr><td>Quân nhân được thăm</td><td id="recSoldier"></td></tr>
                     <tr id="recUnitRow"><td>Đơn vị</td><td id="recUnit"></td></tr>
+                    <tr id="recLocationRow"><td>Vị trí thăm thân</td><td id="recLocation"></td></tr>
+                    <tr><td>Số lượng người nhà</td><td id="recCount"></td></tr>
                     <tr><td>Ngày thăm</td><td id="recDate"></td></tr>
                     <tr><td>Thời gian gửi</td><td id="recTime"></td></tr>
                     <tr><td>Trạng thái</td><td><span class="badge badge-pending" id="recStatus"></span></td></tr>

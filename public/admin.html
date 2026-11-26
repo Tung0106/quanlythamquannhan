@@ -16,7 +16,8 @@
                     </svg>
                 </div>
                 <div class="mil-brand-text">
-                    <h1 id="hdrUnitName">ĐƠN VỊ QUÂN ĐỘI NHÂN DÂN VIỆT NAM</h1>
+                    <h1 id="hdrUnitName">BỘ CHỈ HUY QUÂN SỰ TỈNH GIA LAI
+TRUNG ĐOÀN 739</h1>
                     <p id="hdrGateTitle">CỔNG TRỰC BAN - NHÀ TIẾP ĐÓN THÂN NHÂN</p>
                 </div>
             </div>
@@ -116,6 +117,7 @@
                 <button type="button" class="tab-btn active" data-tab="tabVisitors">Danh sách chi tiết (<span id="countVisitorsTab">0</span>)</button>
                 <button type="button" class="tab-btn" data-tab="tabBySoldier">Tổng hợp theo Quân nhân (<span id="countSoldiersTab">0</span>)</button>
                 <button type="button" class="tab-btn" data-tab="tabSummary">Thống kê theo Ngày &amp; Quan hệ</button>
+                <button type="button" class="tab-btn" data-tab="tabSoldiers">Danh sách Quân nhân (<span id="countRosterTab">0</span>)</button>
                 <button type="button" class="tab-btn" data-tab="tabQr">Mã QR Dán Cổng</button>
                 <button type="button" class="tab-btn" data-tab="tabSettings">Cài đặt &amp; Tài khoản</button>
             </div>
@@ -134,13 +136,14 @@
                                 <th>Số CCCD</th>
                                 <th>Quan hệ</th>
                                 <th>Quân nhân được thăm</th>
+                                <th>Vị trí / Số người</th>
                                 <th>Liên hệ / Ghi chú</th>
                                 <th>Trạng thái</th>
                                 <th class="no-print">Xử lý</th>
                             </tr>
                         </thead>
                         <tbody id="visitorsTbody">
-                            <tr><td colspan="11" style="text-align:center; padding: 24px;">Đang tải dữ liệu...</td></tr>
+                            <tr><td colspan="12" style="text-align:center; padding: 24px;">Đang tải dữ liệu...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -204,6 +207,92 @@
                 </div>
             </div>
 
+            <!-- Tab: Soldier Roster Import from Excel -->
+            <div id="tabSoldiers" class="tab-panel">
+                <div class="notice-box">
+                    Khi có danh sách quân nhân được nạp tại đây, ở trang đăng ký của khách mục <strong>Tên (quân nhân) được thăm</strong> sẽ tự động chuyển sang chế độ <strong>Tìm kiếm &amp; Chọn từ danh sách</strong> (và tự điền đơn vị tương ứng). Nếu xóa trống danh sách, khách sẽ nhập tay như bình thường.
+                </div>
+                <div id="rosterMsg" class="alert" style="display: none;"></div>
+                <div class="form-row">
+                    <div>
+                        <h3 class="card-title">Nạp danh sách từ file Excel (.xlsx / .csv)</h3>
+                        <div class="form-group">
+                            <label for="soldierExcelFile">Chọn file Excel (.xlsx hoặc .csv UTF-8)</label>
+                            <input type="file" id="soldierExcelFile" accept=".xlsx,.csv,.txt">
+                            <div class="hint">
+                                File gồm các cột: <strong>Họ tên quân nhân</strong> (bắt buộc), <strong>Đơn vị</strong> (tùy chọn), <strong>Cấp bậc / Chức vụ</strong> (tùy chọn).
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="rosterImportMode">Cách nạp dữ liệu</label>
+                            <select id="rosterImportMode">
+                                <option value="replace">Thay thế toàn bộ danh sách cũ</option>
+                                <option value="append">Thêm nối tiếp vào danh sách hiện có (bỏ qua trùng lặp)</option>
+                            </select>
+                        </div>
+                        <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px;">
+                            <button type="button" id="uploadRosterBtn" class="btn btn-primary" disabled>Lưu danh sách lên hệ thống</button>
+                            <button type="button" id="downloadSampleExcelBtn" class="btn btn-outline">Tải file Excel mẫu (.csv)</button>
+                        </div>
+                        <div id="rosterPreviewBox" style="display: none; margin-bottom: 16px;">
+                            <div class="hint" id="rosterPreviewInfo" style="margin-bottom: 6px; font-weight: 600; color: var(--army-800);"></div>
+                            <div class="table-wrap" style="max-height: 220px; overflow-y: auto;">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr><th>STT</th><th>Họ tên quân nhân</th><th>Đơn vị</th><th>Cấp bậc</th></tr>
+                                    </thead>
+                                    <tbody id="rosterPreviewTbody"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <h3 class="card-title">Thêm nhanh 1 quân nhân</h3>
+                        <form id="addSingleSoldierForm" style="margin-bottom: 18px;">
+                            <div class="form-group">
+                                <label for="singleSoldierName">Họ tên quân nhân <span class="req">*</span></label>
+                                <input type="text" id="singleSoldierName" maxlength="80" placeholder="Ví dụ: Nguyễn Văn Bình" required>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="singleSoldierUnit">Đơn vị / Đại đội</label>
+                                    <input type="text" id="singleSoldierUnit" maxlength="80" placeholder="Ví dụ: Đại đội 1">
+                                </div>
+                                <div class="form-group">
+                                    <label for="singleSoldierRank">Cấp bậc / Chức vụ</label>
+                                    <input type="text" id="singleSoldierRank" maxlength="50" placeholder="Ví dụ: Binh nhất">
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-outline">+ Thêm quân nhân</button>
+                        </form>
+                    </div>
+                </div>
+
+                <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 16px 0;">
+                <div style="display: flex; gap: 10px; flex-wrap: wrap; justify-content: space-between; align-items: end; margin-bottom: 12px;">
+                    <div style="flex: 1; min-width: 240px;">
+                        <label for="rosterSearchInput">Tìm trong danh sách quân nhân đang lưu</label>
+                        <input type="text" id="rosterSearchInput" placeholder="Nhập tên hoặc đơn vị...">
+                    </div>
+                    <button type="button" id="clearRosterBtn" class="btn btn-danger btn-sm">Xóa toàn bộ danh sách</button>
+                </div>
+                <div class="table-wrap">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>STT</th>
+                                <th>Họ tên quân nhân</th>
+                                <th>Đơn vị</th>
+                                <th>Cấp bậc / Chức vụ</th>
+                                <th>Xóa</th>
+                            </tr>
+                        </thead>
+                        <tbody id="rosterTbody"></tbody>
+                    </table>
+                </div>
+            </div>
+
             <!-- Tab 4: QR Code Generator -->
             <div id="tabQr" class="tab-panel">
                 <div class="form-row">
@@ -242,8 +331,8 @@
                         <div id="settingsMsg" class="alert" style="display: none;"></div>
                         <form id="settingsForm">
                             <div class="form-group">
-                                <label for="setUnitName">Tên đơn vị</label>
-                                <input type="text" id="setUnitName">
+                                <label for="setUnitName">Tên đơn vị (nhấn Enter để xuống dòng)</label>
+                                <textarea id="setUnitName" rows="2"></textarea>
                             </div>
                             <div class="form-group">
                                 <label for="setGateTitle">Tiêu đề cổng / nhà tiếp dân</label>
@@ -374,7 +463,7 @@
                         </select>
                     </div>
                     <div class="form-group">
-                        <label>Tên quân nhân được thăm <span class="req">*</span></label>
+                        <label>Tên (quân nhân) được thăm <span class="req">*</span></label>
                         <input type="text" name="soldier_name" maxlength="80" required>
                     </div>
                 </div>
@@ -390,6 +479,16 @@
                     <div class="form-group">
                         <label>Đơn vị (không bắt buộc)</label>
                         <input type="text" name="unit_name" maxlength="80">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Vị trí thăm thân</label>
+                        <input type="text" name="visit_location" maxlength="100" placeholder="Căn tin, sân bóng, nhà sa bàn...">
+                    </div>
+                    <div class="form-group">
+                        <label>Số lượng người nhà <span class="req">*</span></label>
+                        <input type="number" name="visitor_count" min="1" max="50" value="1" required>
                     </div>
                 </div>
                 <div class="form-row">
@@ -444,6 +543,7 @@
         Hệ thống Đăng ký &amp; Tổng hợp Thân nhân Thăm Quân nhân • Phục vụ công tác Trực ban &amp; Tiếp đón
     </footer>
 
+    <script src="/js/excel-reader.js"></script>
     <script src="/js/admin.js"></script>
 </body>
 </html>

@@ -86,7 +86,7 @@
     function renderVisitorsTable(visitors) {
         const tbody = document.getElementById("visitorsTbody");
         if (!visitors.length) {
-            tbody.innerHTML = '<tr><td colspan="11" style="text-align:center; padding: 24px; color: #6b7280;">Chưa có dữ liệu đăng ký nào trong khoảng thời gian đã chọn.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="12" style="text-align:center; padding: 24px; color: #6b7280;">Chưa có dữ liệu đăng ký nào trong khoảng thời gian đã chọn.</td></tr>';
             return;
         }
 
@@ -96,6 +96,10 @@
             if (v.phone) contactParts.push("SĐT: " + escapeHtml(v.phone));
             if (v.note) contactParts.push(escapeHtml(v.note));
             const contactHtml = contactParts.join("<br>") || '<span style="color:#9ca3af;">—</span>';
+
+            const locText = v.visit_location ? escapeHtml(v.visit_location) : '<span style="color:#9ca3af;">—</span>';
+            const cntNum = parseInt(v.visitor_count || 1, 10) || 1;
+            const locCountHtml = `<div>${locText}</div><div class="hint" style="margin:0;"><strong>${cntNum} người</strong></div>`;
 
             const unitSub = v.unit_name
                 ? `<div class="hint" style="margin:0;">Đơn vị: ${escapeHtml(v.unit_name)}</div>`
@@ -129,6 +133,7 @@
                         <strong>${escapeHtml(v.soldier_name)}</strong>
                         ${unitSub}
                     </td>
+                    <td>${locCountHtml}</td>
                     <td>${contactHtml}</td>
                     <td>
                         <span class="badge badge-${escapeHtml(v.status)}">${escapeHtml(v.status_label)}</span>
@@ -326,6 +331,12 @@
         const formData = new FormData(manualForm);
         const payload = Object.fromEntries(formData.entries());
 
+        if (/^(\d)\1{11}$/.test((payload.cccd || "").trim())) {
+            manualError.textContent = "Số CCCD không hợp lệ (12 chữ số không được giống nhau toàn bộ).";
+            manualError.style.display = "block";
+            return;
+        }
+
         const resp = await apiFetch("/api/admin/visitors", {
             method: "POST",
             body: JSON.stringify(payload),
@@ -514,6 +525,190 @@
         }
     });
 
+    // Soldier Roster Management (Excel Upload, Single Add, Search, Delete)
+    let pendingExcelSoldiers = [];
+    const soldierExcelFile = document.getElementById("soldierExcelFile");
+    const uploadRosterBtn = document.getElementById("uploadRosterBtn");
+    const rosterMsg = document.getElementById("rosterMsg");
+    const rosterPreviewBox = document.getElementById("rosterPreviewBox");
+    const rosterPreviewInfo = document.getElementById("rosterPreviewInfo");
+    const rosterPreviewTbody = document.getElementById("rosterPreviewTbody");
+    const rosterSearchInput = document.getElementById("rosterSearchInput");
+    let rosterSearchTimer = null;
+
+    async function loadSoldierRoster() {
+        const q = rosterSearchInput.value.trim();
+        const qs = q ? "?q=" + encodeURIComponent(q) : "";
+        try {
+            const resp = await fetch("/api/admin/soldiers" + qs);
+            const data = await resp.json();
+            if (!data.ok) return;
+
+            document.getElementById("countRosterTab").textContent = data.total;
+            const tbody = document.getElementById("rosterTbody");
+            if (!data.soldiers.length) {
+                tbody.innerHTML =
+                    '<tr><td colspan="5" style="text-align:center; padding: 20px; color: #6b7280;">Chưa có quân nhân nào trong danh sách.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = data.soldiers
+                .map(
+                    (s, idx) => `
+                <tr>
+                    <td>${idx + 1}</td>
+                    <td><strong>${escapeHtml(s.full_name)}</strong></td>
+                    <td>${escapeHtml(s.unit_name || "—")}</td>
+                    <td>${escapeHtml(s.rank_title || "—")}</td>
+                    <td>
+                        <button class="btn btn-danger btn-sm" onclick="window.deleteSoldierItem(${s.id}, '${escapeHtml(s.full_name)}')">Xóa</button>
+                    </td>
+                </tr>
+            `
+                )
+                .join("");
+        } catch (err) {
+            console.error("Failed to load soldier roster:", err);
+        }
+    }
+
+    window.deleteSoldierItem = async function (id, name) {
+        if (!confirm(`Xóa quân nhân "${name}" khỏi danh sách?`)) return;
+        const resp = await apiFetch(`/api/admin/soldiers/${id}`, { method: "DELETE" });
+        if (resp.ok) {
+            loadSoldierRoster();
+        }
+    };
+
+    soldierExcelFile.addEventListener("change", async () => {
+        rosterMsg.style.display = "none";
+        pendingExcelSoldiers = [];
+        uploadRosterBtn.disabled = true;
+        rosterPreviewBox.style.display = "none";
+
+        const file = soldierExcelFile.files[0];
+        if (!file) return;
+
+        try {
+            const parsed = await window.readSoldierExcelFile(file);
+            if (!parsed.length) {
+                showBanner(rosterMsg, false, "Không đọc được dòng dữ liệu quân nhân nào trong file.");
+                return;
+            }
+            pendingExcelSoldiers = parsed;
+            uploadRosterBtn.disabled = false;
+            rosterPreviewInfo.textContent = `Đã đọc được ${parsed.length} quân nhân từ file "${file.name}" (xem trước tối đa 30 dòng):`;
+            rosterPreviewTbody.innerHTML = parsed
+                .slice(0, 30)
+                .map(
+                    (s, idx) => `
+                <tr>
+                    <td>${idx + 1}</td>
+                    <td>${escapeHtml(s.full_name)}</td>
+                    <td>${escapeHtml(s.unit_name || "—")}</td>
+                    <td>${escapeHtml(s.rank_title || "—")}</td>
+                </tr>
+            `
+                )
+                .join("");
+            rosterPreviewBox.style.display = "block";
+        } catch (err) {
+            showBanner(rosterMsg, false, err.message || "Không đọc được file Excel.");
+        }
+    });
+
+    uploadRosterBtn.addEventListener("click", async () => {
+        if (!pendingExcelSoldiers.length) return;
+        const mode = document.getElementById("rosterImportMode").value;
+        if (
+            mode === "replace" &&
+            !confirm(
+                `Thay thế toàn bộ danh sách quân nhân cũ bằng ${pendingExcelSoldiers.length} người từ file vừa chọn?`
+            )
+        ) {
+            return;
+        }
+
+        uploadRosterBtn.disabled = true;
+        uploadRosterBtn.textContent = "ĐANG LƯU...";
+        try {
+            const resp = await apiFetch("/api/admin/soldiers/import", {
+                method: "POST",
+                body: JSON.stringify({ mode, soldiers: pendingExcelSoldiers }),
+            });
+            const data = await resp.json();
+            if (!resp.ok || !data.ok) {
+                showBanner(rosterMsg, false, data.error || "Không thể nhập danh sách.");
+                uploadRosterBtn.disabled = false;
+                return;
+            }
+            showBanner(
+                rosterMsg,
+                true,
+                `Đã nạp thành công ${data.imported} quân nhân vào hệ thống` +
+                    (data.skipped ? ` (bỏ qua ${data.skipped} dòng trống/trùng/lỗi tên).` : ".")
+            );
+            pendingExcelSoldiers = [];
+            soldierExcelFile.value = "";
+            rosterPreviewBox.style.display = "none";
+            loadSoldierRoster();
+        } finally {
+            uploadRosterBtn.textContent = "Lưu danh sách lên hệ thống";
+        }
+    });
+
+    document.getElementById("downloadSampleExcelBtn").addEventListener("click", () => {
+        const bom = "\uFEFF";
+        const sample =
+            bom +
+            [
+                "Họ tên quân nhân,Đơn vị,Cấp bậc / Chức vụ",
+                "Nguyễn Văn Bình,Đại đội 1 - Tiểu đoàn 1,Binh nhất",
+                "Trần Minh Tuấn,Đại đội 2 - Tiểu đoàn 1,Binh nhì",
+                "Lê Hoàng Anh,Đại đội 3 - Tiểu đoàn 2,Trung sĩ",
+            ].join("\r\n");
+        const blob = new Blob([sample], { type: "text/csv;charset=utf-8;" });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = "mau-danh-sach-quan-nhan.csv";
+        link.click();
+    });
+
+    document.getElementById("addSingleSoldierForm").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const resp = await apiFetch("/api/admin/soldiers", {
+            method: "POST",
+            body: JSON.stringify({
+                full_name: document.getElementById("singleSoldierName").value.trim(),
+                unit_name: document.getElementById("singleSoldierUnit").value.trim(),
+                rank_title: document.getElementById("singleSoldierRank").value.trim(),
+            }),
+        });
+        const data = await resp.json();
+        showBanner(
+            rosterMsg,
+            data.ok,
+            data.ok ? "Đã thêm quân nhân mới." : (data.error || "Không thể thêm quân nhân.")
+        );
+        if (data.ok) {
+            document.getElementById("addSingleSoldierForm").reset();
+            loadSoldierRoster();
+        }
+    });
+
+    rosterSearchInput.addEventListener("input", () => {
+        if (rosterSearchTimer) clearTimeout(rosterSearchTimer);
+        rosterSearchTimer = setTimeout(loadSoldierRoster, 200);
+    });
+
+    document.getElementById("clearRosterBtn").addEventListener("click", async () => {
+        if (!confirm("Xác nhận xóa TOÀN BỘ danh sách quân nhân đang lưu?")) return;
+        const resp = await apiFetch("/api/admin/soldiers", { method: "DELETE" });
+        if (resp.ok) {
+            showBanner(rosterMsg, true, "Đã xóa toàn bộ danh sách quân nhân.");
+            loadSoldierRoster();
+        }
+    });
+
     document.getElementById("logoutBtn").addEventListener("click", async () => {
         await apiFetch("/api/logout", { method: "POST" });
         window.location.replace("/login");
@@ -572,7 +767,7 @@
         }
 
         document.body.style.visibility = "visible";
-        await loadDashboard();
+        await Promise.all([loadDashboard(), loadSoldierRoster()]);
         setInterval(loadDashboard, 30000);
     }
 

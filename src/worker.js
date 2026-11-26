@@ -184,6 +184,8 @@ async function ensureDb(env) {
           soldier_name TEXT NOT NULL,
           unit_name TEXT NOT NULL DEFAULT '',
           phone TEXT NOT NULL DEFAULT '',
+          visit_location TEXT NOT NULL DEFAULT '',
+          visitor_count INTEGER NOT NULL DEFAULT 1,
           note TEXT NOT NULL DEFAULT '',
           status TEXT NOT NULL DEFAULT 'pending',
           visit_date TEXT NOT NULL,
@@ -213,13 +215,35 @@ async function ensureDb(env) {
           created_at INTEGER NOT NULL
         )`,
         `CREATE INDEX IF NOT EXISTS idx_rate_limits_ip ON rate_limits (ip, created_at)`,
+        `CREATE TABLE IF NOT EXISTS soldiers (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          full_name TEXT NOT NULL,
+          name_norm TEXT NOT NULL,
+          unit_name TEXT NOT NULL DEFAULT '',
+          rank_title TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL
+        )`,
+        `CREATE INDEX IF NOT EXISTS idx_soldiers_name_norm ON soldiers (name_norm)`,
       ];
       for (const sql of stmts) {
         await env.DB.prepare(sql).run();
       }
 
+      // Safe column migrations for existing D1 databases
+      try {
+        await env.DB.prepare(
+          "ALTER TABLE visitors ADD COLUMN visit_location TEXT NOT NULL DEFAULT ''"
+        ).run();
+      } catch {}
+      try {
+        await env.DB.prepare(
+          "ALTER TABLE visitors ADD COLUMN visitor_count INTEGER NOT NULL DEFAULT 1"
+        ).run();
+      } catch {}
+
+      const newDefaultUnit = "Bộ Chỉ huy quân sự tỉnh Gia Lai\nTrung đoàn 739";
       const defaults = {
-        unit_name: env.DEFAULT_UNIT_NAME || "ĐƠN VỊ QUÂN ĐỘI NHÂN DÂN VIỆT NAM",
+        unit_name: env.DEFAULT_UNIT_NAME || newDefaultUnit,
         gate_title: env.DEFAULT_GATE_TITLE || "CỔNG TRỰC BAN - NHÀ TIẾP ĐÓN THÂN NHÂN",
         welcome_note:
           "Quý thân nhân vui lòng điền đầy đủ, chính xác thông tin theo Căn cước công dân để phục vụ công tác kiểm tra và tiếp đón tại đơn vị.",
@@ -235,20 +259,46 @@ async function ensureDb(env) {
           .run();
       }
 
+      if (!env.DEFAULT_UNIT_NAME) {
+        await env.DB.prepare(
+          "UPDATE settings SET value = ? WHERE key = 'unit_name' AND value = 'ĐƠN VỊ QUÂN ĐỘI NHÂN DÂN VIỆT NAM'"
+        )
+          .bind(newDefaultUnit)
+          .run();
+      }
+
+      const adminUser = (env.ADMIN_USERNAME || "e739").trim() || "e739";
+      const defaultPass = (env.ADMIN_PASSWORD || "").trim() || "739999";
+
       const countRow = await env.DB.prepare("SELECT COUNT(*) AS cnt FROM users").first();
       if (!countRow || countRow.cnt === 0) {
-        const adminUser = (env.ADMIN_USERNAME || "trucban").trim() || "trucban";
-        const envPass = (env.ADMIN_PASSWORD || "").trim();
-        const defaultPass = envPass || "QuanDoi@2026";
-        const mustChange = envPass ? 0 : 1;
         const pwHash = await hashPassword(defaultPass);
-
         await env.DB.prepare(
           `INSERT INTO users (username, full_name, role, password_hash, must_change_password, created_at)
-           VALUES (?, ?, 'admin', ?, ?, ?)`
+           VALUES (?, ?, 'admin', ?, 0, ?)`
         )
-          .bind(adminUser, "Trực ban trưởng (Quản trị)", pwHash, mustChange, nowVnStr())
+          .bind(adminUser, "Quản trị viên Trung đoàn 739", pwHash, nowVnStr())
           .run();
+      } else if (!env.ADMIN_USERNAME) {
+        const hasE739 = await env.DB.prepare(
+          "SELECT id FROM users WHERE username = 'e739'"
+        ).first();
+        if (!hasE739) {
+          const oldTrucban = await env.DB.prepare(
+            "SELECT id FROM users WHERE username = 'trucban'"
+          ).first();
+          if (oldTrucban) {
+            const pwHash = await hashPassword(defaultPass);
+            await env.DB.prepare(
+              `UPDATE users
+               SET username = 'e739', full_name = 'Quản trị viên Trung đoàn 739',
+                   role = 'admin', password_hash = ?, must_change_password = 0
+               WHERE id = ?`
+            )
+              .bind(pwHash, oldTrucban.id)
+              .run();
+          }
+        }
       }
     })().catch((err) => {
       dbInitPromise = null;
@@ -313,6 +363,8 @@ function validateVisitorPayload(data) {
   const soldier_name = cleanSpaces(data.soldier_name);
   const unit_name = cleanSpaces(data.unit_name);
   const phone = String(data.phone || "").trim();
+  const visit_location = cleanSpaces(data.visit_location);
+  const rawCount = data.visitor_count === undefined || data.visitor_count === "" ? "1" : String(data.visitor_count).trim();
   const note = cleanSpaces(data.note);
 
   if (!isValidPersonName(full_name)) {
@@ -347,6 +399,11 @@ function validateVisitorPayload(data) {
       error: "Số CCCD phải gồm đúng 12 chữ số, không được nhập chữ hoặc ký tự khác.",
     };
   }
+  if (/^(\d)\1{11}$/.test(cccd)) {
+    return {
+      error: "Số CCCD không hợp lệ (12 chữ số không được giống nhau toàn bộ như 000000000000 hoặc 111111111111).",
+    };
+  }
 
   if (!isValidPersonName(soldier_name)) {
     return {
@@ -364,6 +421,18 @@ function validateVisitorPayload(data) {
 
   if (unit_name && (unit_name.length > 80 || /[<>]/.test(unit_name))) {
     return { error: "Tên đơn vị không hợp lệ (tối đa 80 ký tự, không chứa < hoặc >)." };
+  }
+
+  if (visit_location && (visit_location.length > 100 || /[<>]/.test(visit_location))) {
+    return { error: "Vị trí thăm thân không hợp lệ (tối đa 100 ký tự, không chứa < hoặc >)." };
+  }
+
+  if (!/^\d+$/.test(rawCount)) {
+    return { error: "Số lượng người nhà vào thăm phải là số nguyên từ 1 đến 50." };
+  }
+  const visitor_count = parseInt(rawCount, 10);
+  if (visitor_count < 1 || visitor_count > 50) {
+    return { error: "Số lượng người nhà vào thăm phải từ 1 đến 50 người." };
   }
 
   if (note && (note.length > 250 || /[<>]/.test(note))) {
@@ -384,6 +453,8 @@ function validateVisitorPayload(data) {
       soldier_name,
       unit_name,
       phone,
+      visit_location,
+      visitor_count,
       note,
       visit_date,
     },
@@ -494,13 +565,23 @@ async function getSessionAuth(request, env) {
   return { user, csrfToken: sess.csrf_token, sessionToken: sess.token };
 }
 
-async function readJsonBody(request) {
+function normalizeVi(str) {
+  return String(str || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[đĐ]/g, "d")
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+async function readJsonBody(request, maxBytes = 64 * 1024) {
   const contentLength = parseInt(request.headers.get("Content-Length") || "0", 10);
-  if (contentLength > 64 * 1024) {
+  if (contentLength > maxBytes) {
     throw new Error("PAYLOAD_TOO_LARGE");
   }
   const text = await request.text();
-  if (text.length > 64 * 1024) {
+  if (text.length > maxBytes) {
     throw new Error("PAYLOAD_TOO_LARGE");
   }
   try {
@@ -560,13 +641,38 @@ export default {
       const nonce = randomHex(16);
       const sig = await hmacSign(secret, nonce);
       const loginCsrf = `${nonce}.${sig}`;
+      const soldierCountRow = await env.DB.prepare(
+        "SELECT COUNT(*) AS cnt FROM soldiers"
+      ).first();
+      const soldiersCount = soldierCountRow?.cnt || 0;
       return jsonResponse({
         ok: true,
         settings,
         relationships: RELATIONSHIP_OPTIONS,
         today: todayVnStr(),
         login_csrf: loginCsrf,
+        has_soldier_roster: soldiersCount > 0,
+        soldiers_count: soldiersCount,
       });
+    }
+
+    // Public soldier search (accent-insensitive, returns top 20 matches)
+    if (path === "/api/soldiers/search" && method === "GET") {
+      const qRaw = (url.searchParams.get("q") || "").trim();
+      const qNorm = normalizeVi(qRaw);
+      if (qNorm.length < 1) {
+        return jsonResponse({ ok: true, soldiers: [] });
+      }
+      const rows = await env.DB.prepare(
+        `SELECT id, full_name, unit_name, rank_title
+         FROM soldiers
+         WHERE name_norm LIKE ? OR LOWER(unit_name) LIKE ?
+         ORDER BY full_name ASC
+         LIMIT 20`
+      )
+        .bind(`%${qNorm}%`, `%${qRaw.toLowerCase()}%`)
+        .all();
+      return jsonResponse({ ok: true, soldiers: rows.results || [] });
     }
 
     // Public visitor registration
@@ -596,6 +702,44 @@ export default {
         return jsonResponse({ ok: false, error: "Dữ liệu gửi lên quá lớn." }, 413);
       }
 
+      const rosterRow = await env.DB.prepare("SELECT COUNT(*) AS cnt FROM soldiers").first();
+      const hasRoster = (rosterRow?.cnt || 0) > 0;
+      let matchedSoldier = null;
+
+      if (hasRoster) {
+        const sid = parseInt(payload.soldier_id || "0", 10);
+        if (sid > 0) {
+          matchedSoldier = await env.DB.prepare(
+            "SELECT id, full_name, unit_name FROM soldiers WHERE id = ?"
+          )
+            .bind(sid)
+            .first();
+        }
+        if (!matchedSoldier) {
+          const sNorm = normalizeVi(payload.soldier_name || "");
+          if (sNorm) {
+            matchedSoldier = await env.DB.prepare(
+              "SELECT id, full_name, unit_name FROM soldiers WHERE name_norm = ? LIMIT 1"
+            )
+              .bind(sNorm)
+              .first();
+          }
+        }
+        if (!matchedSoldier) {
+          return jsonResponse(
+            {
+              ok: false,
+              error: "Vui lòng tìm kiếm và bấm chọn đúng tên quân nhân từ danh sách đơn vị.",
+            },
+            400
+          );
+        }
+        payload.soldier_name = matchedSoldier.full_name;
+        if (!String(payload.unit_name || "").trim() && matchedSoldier.unit_name) {
+          payload.unit_name = matchedSoldier.unit_name;
+        }
+      }
+
       const { cleaned, error } = validateVisitorPayload(payload);
       if (error) {
         return jsonResponse({ ok: false, error }, 400);
@@ -606,9 +750,9 @@ export default {
       const result = await env.DB.prepare(
         `INSERT INTO visitors (
           reg_code, full_name, date_of_birth, relationship, cccd,
-          soldier_name, unit_name, phone, note, status,
+          soldier_name, unit_name, phone, visit_location, visitor_count, note, status,
           visit_date, created_at, updated_at, checked_by
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, '')`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, '')`
       )
         .bind(
           regCode,
@@ -619,6 +763,8 @@ export default {
           cleaned.soldier_name,
           cleaned.unit_name,
           cleaned.phone,
+          cleaned.visit_location,
+          cleaned.visitor_count,
           cleaned.note,
           cleaned.visit_date,
           nowStr,
@@ -638,6 +784,8 @@ export default {
             cccd_masked: `${cleaned.cccd.slice(0, 4)}****${cleaned.cccd.slice(-4)}`,
             soldier_name: cleaned.soldier_name,
             unit_name: cleaned.unit_name,
+            visit_location: cleaned.visit_location,
+            visitor_count: cleaned.visitor_count,
             visit_date_vn: formatDobVn(cleaned.visit_date),
             created_at: nowStr,
             status_label: STATUS_LABELS.pending,
@@ -816,10 +964,10 @@ export default {
         `SELECT
            soldier_name,
            MAX(unit_name) AS unit_name,
-           COUNT(*) AS total_visitors,
-           SUM(CASE WHEN status = 'checked_in' THEN 1 ELSE 0 END) AS checked_in_count,
-           SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending_count,
-           SUM(CASE WHEN status = 'checked_out' THEN 1 ELSE 0 END) AS checked_out_count,
+           COALESCE(SUM(COALESCE(visitor_count, 1)), 0) AS total_visitors,
+           COALESCE(SUM(CASE WHEN status = 'checked_in' THEN COALESCE(visitor_count, 1) ELSE 0 END), 0) AS checked_in_count,
+           COALESCE(SUM(CASE WHEN status = 'pending' THEN COALESCE(visitor_count, 1) ELSE 0 END), 0) AS pending_count,
+           COALESCE(SUM(CASE WHEN status = 'checked_out' THEN COALESCE(visitor_count, 1) ELSE 0 END), 0) AS checked_out_count,
            MAX(visit_date) AS latest_visit
          FROM visitors ${whereSql}
          GROUP BY soldier_name
@@ -835,10 +983,10 @@ export default {
       const byDateRes = await env.DB.prepare(
         `SELECT
            visit_date,
-           COUNT(*) AS total_visitors,
-           SUM(CASE WHEN status = 'checked_in' THEN 1 ELSE 0 END) AS checked_in_count,
-           SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending_count,
-           SUM(CASE WHEN status = 'checked_out' THEN 1 ELSE 0 END) AS checked_out_count
+           COALESCE(SUM(COALESCE(visitor_count, 1)), 0) AS total_visitors,
+           COALESCE(SUM(CASE WHEN status = 'checked_in' THEN COALESCE(visitor_count, 1) ELSE 0 END), 0) AS checked_in_count,
+           COALESCE(SUM(CASE WHEN status = 'pending' THEN COALESCE(visitor_count, 1) ELSE 0 END), 0) AS pending_count,
+           COALESCE(SUM(CASE WHEN status = 'checked_out' THEN COALESCE(visitor_count, 1) ELSE 0 END), 0) AS checked_out_count
          FROM visitors ${whereSql}
          GROUP BY visit_date
          ORDER BY visit_date DESC
@@ -852,7 +1000,7 @@ export default {
       }));
 
       const byRelRes = await env.DB.prepare(
-        `SELECT relationship, COUNT(*) AS total_visitors
+        `SELECT relationship, COALESCE(SUM(COALESCE(visitor_count, 1)), 0) AS total_visitors
          FROM visitors ${whereSql}
          GROUP BY relationship
          ORDER BY total_visitors DESC`
@@ -861,26 +1009,33 @@ export default {
         .all();
 
       const todayRow = await env.DB.prepare(
-        "SELECT COUNT(*) AS cnt FROM visitors WHERE visit_date = ?"
+        "SELECT COALESCE(SUM(COALESCE(visitor_count, 1)), 0) AS cnt FROM visitors WHERE visit_date = ?"
       )
         .bind(today)
         .first();
       const activeRow = await env.DB.prepare(
-        "SELECT COUNT(*) AS cnt FROM visitors WHERE visit_date = ? AND status = 'checked_in'"
+        "SELECT COALESCE(SUM(COALESCE(visitor_count, 1)), 0) AS cnt FROM visitors WHERE visit_date = ? AND status = 'checked_in'"
       )
         .bind(today)
         .first();
       const weekRow = await env.DB.prepare(
-        "SELECT COUNT(*) AS cnt FROM visitors WHERE visit_date >= ?"
+        "SELECT COALESCE(SUM(COALESCE(visitor_count, 1)), 0) AS cnt FROM visitors WHERE visit_date >= ?"
       )
         .bind(weekStart)
         .first();
       const monthRow = await env.DB.prepare(
-        "SELECT COUNT(*) AS cnt FROM visitors WHERE visit_date >= ?"
+        "SELECT COALESCE(SUM(COALESCE(visitor_count, 1)), 0) AS cnt FROM visitors WHERE visit_date >= ?"
       )
         .bind(monthStart)
         .first();
-      const allRow = await env.DB.prepare("SELECT COUNT(*) AS cnt FROM visitors").first();
+      const allRow = await env.DB.prepare(
+        "SELECT COALESCE(SUM(COALESCE(visitor_count, 1)), 0) AS cnt FROM visitors"
+      ).first();
+
+      const filteredPeople = visitors.reduce(
+        (sum, v) => sum + (parseInt(v.visitor_count || 1, 10) || 1),
+        0
+      );
 
       return jsonResponse({
         ok: true,
@@ -890,7 +1045,7 @@ export default {
           week_count: weekRow?.cnt || 0,
           month_count: monthRow?.cnt || 0,
           all_count: allRow?.cnt || 0,
-          filtered_total: visitors.length,
+          filtered_total: filteredPeople,
           unique_soldiers: by_soldier.length,
         },
         visitors,
@@ -913,9 +1068,9 @@ export default {
       const res = await env.DB.prepare(
         `INSERT INTO visitors (
           reg_code, full_name, date_of_birth, relationship, cccd,
-          soldier_name, unit_name, phone, note, status,
+          soldier_name, unit_name, phone, visit_location, visitor_count, note, status,
           visit_date, created_at, updated_at, checked_by
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
         .bind(
           regCode,
@@ -926,6 +1081,8 @@ export default {
           cleaned.soldier_name,
           cleaned.unit_name,
           cleaned.phone,
+          cleaned.visit_location,
+          cleaned.visitor_count,
           cleaned.note,
           status,
           cleaned.visit_date,
@@ -986,9 +1143,11 @@ export default {
         "Ngày sinh",
         "Quan hệ quân nhân",
         "Số CCCD",
-        "Tên quân nhân được thăm",
+        "Tên (quân nhân) được thăm",
         "Đơn vị",
         "Số điện thoại",
+        "Vị trí thăm thân",
+        "Số lượng người nhà",
         "Ghi chú",
         "Trạng thái",
         "Thời gian đăng ký",
@@ -1011,6 +1170,8 @@ export default {
             r.soldier_name,
             r.unit_name,
             r.phone ? `'${r.phone}` : "",
+            r.visit_location || "",
+            r.visitor_count || 1,
             r.note,
             STATUS_LABELS[r.status] || r.status,
             r.created_at,
@@ -1249,6 +1410,153 @@ export default {
         await env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(uid).run();
         return jsonResponse({ ok: true });
       }
+    }
+
+    // Admin Soldier Roster (List, Import from Excel, Add, Delete, Clear)
+    if (path === "/api/admin/soldiers" && method === "GET") {
+      const qRaw = (url.searchParams.get("q") || "").trim();
+      const qNorm = normalizeVi(qRaw);
+      let rowsRes;
+      if (qNorm) {
+        rowsRes = await env.DB.prepare(
+          `SELECT id, full_name, unit_name, rank_title, created_at
+           FROM soldiers
+           WHERE name_norm LIKE ? OR LOWER(unit_name) LIKE ? OR LOWER(rank_title) LIKE ?
+           ORDER BY full_name ASC
+           LIMIT 500`
+        )
+          .bind(`%${qNorm}%`, `%${qRaw.toLowerCase()}%`, `%${qRaw.toLowerCase()}%`)
+          .all();
+      } else {
+        rowsRes = await env.DB.prepare(
+          `SELECT id, full_name, unit_name, rank_title, created_at
+           FROM soldiers
+           ORDER BY full_name ASC
+           LIMIT 500`
+        ).all();
+      }
+      const countRow = await env.DB.prepare("SELECT COUNT(*) AS cnt FROM soldiers").first();
+      return jsonResponse({
+        ok: true,
+        total: countRow?.cnt || 0,
+        soldiers: rowsRes.results || [],
+      });
+    }
+
+    if (path === "/api/admin/soldiers" && method === "POST") {
+      const payload = await readJsonBody(request);
+      const full_name = String(payload.full_name || "").trim().replace(/\s+/g, " ");
+      const unit_name = String(payload.unit_name || "").trim().replace(/\s+/g, " ").slice(0, 80);
+      const rank_title = String(payload.rank_title || "").trim().replace(/\s+/g, " ").slice(0, 50);
+
+      if (!isValidPersonName(full_name)) {
+        return jsonResponse(
+          {
+            ok: false,
+            error: "Họ tên quân nhân không hợp lệ (2 - 80 ký tự, chỉ nhập chữ cái và khoảng trắng).",
+          },
+          400
+        );
+      }
+
+      const nameNorm = normalizeVi(full_name);
+      await env.DB.prepare(
+        "INSERT INTO soldiers (full_name, name_norm, unit_name, rank_title, created_at) VALUES (?, ?, ?, ?, ?)"
+      )
+        .bind(full_name, nameNorm, unit_name, rank_title, nowVnStr())
+        .run();
+      return jsonResponse({ ok: true }, 201);
+    }
+
+    if (path === "/api/admin/soldiers/import" && method === "POST") {
+      let payload;
+      try {
+        payload = await readJsonBody(request, 2 * 1024 * 1024);
+      } catch {
+        return jsonResponse({ ok: false, error: "File tải lên quá lớn (tối đa 2MB)." }, 413);
+      }
+
+      const items = Array.isArray(payload.soldiers) ? payload.soldiers : [];
+      if (!items.length) {
+        return jsonResponse({ ok: false, error: "Danh sách tải lên bị trống." }, 400);
+      }
+      if (items.length > 5000) {
+        return jsonResponse({ ok: false, error: "Tối đa 5.000 quân nhân mỗi lần nhập." }, 400);
+      }
+
+      const mode = payload.mode === "append" ? "append" : "replace";
+      const nowStr = nowVnStr();
+      const validRows = [];
+      const seenKeys = new Set();
+
+      if (mode === "append") {
+        const existingRes = await env.DB.prepare("SELECT name_norm, unit_name FROM soldiers").all();
+        for (const r of existingRes.results || []) {
+          seenKeys.add(`${r.name_norm}|${String(r.unit_name || "").toLowerCase()}`);
+        }
+      }
+
+      let skipped = 0;
+      for (const item of items) {
+        const full_name = String(item?.full_name || "").trim().replace(/\s+/g, " ");
+        const unit_name = String(item?.unit_name || "").trim().replace(/\s+/g, " ").slice(0, 80);
+        const rank_title = String(item?.rank_title || "").trim().replace(/\s+/g, " ").slice(0, 50);
+
+        if (!isValidPersonName(full_name) || /[<>]/.test(unit_name) || /[<>]/.test(rank_title)) {
+          skipped++;
+          continue;
+        }
+        const nameNorm = normalizeVi(full_name);
+        const dedupKey = `${nameNorm}|${unit_name.toLowerCase()}`;
+        if (seenKeys.has(dedupKey)) {
+          skipped++;
+          continue;
+        }
+        seenKeys.add(dedupKey);
+        validRows.push({ full_name, name_norm: nameNorm, unit_name, rank_title });
+      }
+
+      if (!validRows.length) {
+        return jsonResponse(
+          {
+            ok: false,
+            error: "Không có dòng hợp lệ nào để lưu (họ tên phải từ 2-80 chữ cái, không chứa số hay trùng lặp).",
+          },
+          400
+        );
+      }
+
+      if (mode === "replace") {
+        await env.DB.prepare("DELETE FROM soldiers").run();
+      }
+
+      const insertStmt = env.DB.prepare(
+        "INSERT INTO soldiers (full_name, name_norm, unit_name, rank_title, created_at) VALUES (?, ?, ?, ?, ?)"
+      );
+      for (let i = 0; i < validRows.length; i += 100) {
+        const chunk = validRows.slice(i, i + 100).map((r) =>
+          insertStmt.bind(r.full_name, r.name_norm, r.unit_name, r.rank_title, nowStr)
+        );
+        await env.DB.batch(chunk);
+      }
+
+      return jsonResponse({
+        ok: true,
+        imported: validRows.length,
+        skipped,
+      });
+    }
+
+    if (path === "/api/admin/soldiers" && method === "DELETE") {
+      await env.DB.prepare("DELETE FROM soldiers").run();
+      return jsonResponse({ ok: true });
+    }
+
+    const delSoldierMatch = path.match(/^\/api\/admin\/soldiers\/(\d+)$/);
+    if (delSoldierMatch && method === "DELETE") {
+      const sid = parseInt(delSoldierMatch[1], 10);
+      await env.DB.prepare("DELETE FROM soldiers WHERE id = ?").bind(sid).run();
+      return jsonResponse({ ok: true });
     }
 
     return jsonResponse({ ok: false, error: "Không tìm thấy API." }, 404);

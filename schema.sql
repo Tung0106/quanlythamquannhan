@@ -18,6 +18,8 @@ CREATE TABLE IF NOT EXISTS visitors (
     soldier_name TEXT NOT NULL,
     unit_name TEXT NOT NULL DEFAULT '',
     phone TEXT NOT NULL DEFAULT '',
+    visit_location TEXT NOT NULL DEFAULT '',
+    visitor_count INTEGER NOT NULL DEFAULT 1,
     note TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'pending',
     visit_date TEXT NOT NULL,
@@ -54,3 +56,14 @@ CREATE TABLE IF NOT EXISTS rate_limits (
 );
 
 CREATE INDEX IF NOT EXISTS idx_rate_limits_ip ON rate_limits (ip, created_at);
+
+CREATE TABLE IF NOT EXISTS soldiers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    full_name TEXT NOT NULL,
+    name_norm TEXT NOT NULL,
+    unit_name TEXT NOT NULL DEFAULT '',
+    rank_title TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_soldiers_name_norm ON soldiers (name_norm);
