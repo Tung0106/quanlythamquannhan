@@ -302,6 +302,18 @@
         const soldiers = [];
         for (let r = startRow; r < rows.length; r++) {
             const row = rows[r];
+            const firstNonEmpty = row.find((cell) => String(cell || "").trim().length > 0);
+            if (firstNonEmpty) {
+                const firstNorm = normalizeHeader(firstNonEmpty);
+                if (
+                    firstNorm.startsWith("tong cong") ||
+                    firstNorm.startsWith("tong quan so") ||
+                    firstNorm.startsWith("bang tong hop")
+                ) {
+                    break;
+                }
+            }
+
             const full_name = String(row[nameCol] || "").trim().replace(/\s+/g, " ");
             if (!full_name) continue;
 
